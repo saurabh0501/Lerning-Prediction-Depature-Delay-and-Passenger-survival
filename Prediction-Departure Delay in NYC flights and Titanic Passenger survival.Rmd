@@ -1,0 +1,462 @@
+---
+title: "INFX 573 Problem Set 8 - Prediction"
+author: "Saurabh Sharma"
+date: "Due: Tuesday, November 26, 2019"
+output: pdf_document
+header-includes:
+- \newcommand{\benum}{\begin{enumerate}}
+- \newcommand{\eenum}{\end{enumerate}}
+- \newcommand{\bitem}{\begin{itemize}}
+- \newcommand{\eitem}{\end{itemize}}
+---
+##### Collaborators: Anirudh Nathani, Rohan Khurana, Heet Palod
+
+##### Instructions: #####
+
+Before beginning this assignment, please ensure you have access to R and RStudio. 
+
+1. Download the `problemset8.Rmd` file from Canvas. Open `problemset8.Rmd` in RStudio and supply your solutions to the assignment by editing `problemset8.Rmd`. 
+
+2. Replace the "Insert Your Name Here" text in the `author:` field with your own full name. Any collaborators must be listed on the top of your assignment. 
+
+3. Be sure to include well-documented (e.g. commented) code chucks, figures and clearly written text chunk explanations as necessary. Any figures should be clearly labeled and appropriately referenced within the text. 
+
+4. Collaboration on problem sets is acceptable, and even encouraged, but each student must turn in an individual write-up in his or her own words and his or her own work. The names of all collaborators must be listed on each assignment. Do not copy-and-paste from other students' responses or code.
+
+5. When you have completed the assignment and have **checked** that your code both runs in the Console and knits correctly when you click `Knit PDF`, rename the R Markdown file to `YourLastName_YourFirstName_ps7.Rmd`, knit a PDF and submit the PDF file on Canvas.
+
+##### Setup:
+
+In this problem set you will need, at minimum, the following R packages.
+
+```{r Setup, message=FALSE}
+# Load standard libraries
+install.packages('pROC', repos = "http://cran.us.r-project.org")
+install.packages('randomForest', repos = "http://cran.us.r-project.org")
+install.packages('gridExtra', repos = "http://cran.us.r-project.org")
+install.packages('MASS', repos = "http://cran.us.r-project.org")
+install.packages('arm', repos = "http://cran.us.r-project.org")
+install.packages('Metrics', repos = "http://cran.us.r-project.org")
+install.packages('GGally', repos = "http://cran.us.r-project.org")
+install.packages('caret', repos = "http://cran.us.r-project.org")
+install.packages('e1071', repos = "http://cran.us.r-project.org")
+library(GGally)
+library(tidyverse)
+library(gridExtra)
+library(MASS)
+library(pROC)
+library(arm)
+library(randomForest)
+library(dplyr)
+library(Metrics)
+library(caret)
+
+```
+
+\noindent \textbf{Data:} In this problem set we will use the \texttt{flights} and \texttt{titanic} datasets used previously in class. The flights dataset (via the the \textit{nycflights13} library) contains information on flight delays and weather. Titanic text file contains data about the survival of passengers aboard the Titanic. Table \ref{tab:data} contains a description of this data. 
+\vspace{.1in}
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{|l|l|}
+\hline
+{\bf Variable} & {\bf Description} \\ \hline \hline
+pclass      &    Passenger Class \\
+            &    (1 = 1st; 2 = 2nd; 3 = 3rd) \\ \hline
+survived    &    Survival \\
+            &    (0 = No; 1 = Yes) \\ \hline
+name        &    Name \\ \hline
+sex         &    Sex \\ \hline
+age         &    Age \\ \hline
+sibsp       &    Number of Siblings/Spouses Aboard \\ \hline
+parch       &    Number of Parents/Children Aboard \\ \hline 
+ticket      &    Ticket Number \\ \hline
+fare        &    Passenger Fare \\ \hline
+cabin       &    Cabin \\ \hline
+embarked    &    Port of Embarkation \\
+            &    (C = Cherbourg; Q = Queenstown; S = Southampton) \\ \hline
+boat        &    Lifeboat \\ \hline
+body        &    Body Identification Number \\ \hline
+home.dest   &    Home/Destination \\
+\hline
+\end{tabular}
+\caption{Description of variables in the Titanic Dataset}
+\label{tab:data}
+\end{table}
+\vspace{.1in}
+
+\newpage
+
+
+As part of this assignment, we will evaluate the performance of several statistical learning methods.  We will fit our learning models using a set of \emph{training} observations and measure its performance on a set of \emph{test} observations.
+\vspace{1cm}
+
+
+1. Discuss the advantages of using a training/test split when evaluating statistical models.
+
+Answer: For evaluating statistical models we divide the dataset into training and test where we usually take a 80:20 ratio. Training dataset is the sample of dataset used to fit the model i.e the model sees and learns from this data. While test dataset is the sample of data used to provide an unbiased evaluation of a final model fit on the training dataset.Generally we can think it as, if we make our model on whole data and then we wont have any data remaining to test the accuracy of our model and hence we require test data from our original sample. On doing this process we try to create an unbiased and as accurate model as possible.
+
+
+#### Predictions with a continuous output variable
+
+2. Load in the flights dataset. Join the flights data to the weather data based on the departure location, date, and hour of the flight. Exclude data entries which cannot be joined to weather data. Copy the joined data so we can refer to it later. 
+
+
+
+```{r Load flghts}
+# Load  new york flights and weather data
+library(nycflights13)
+flights <- as.data.frame(flights)
+weather <- as.data.frame(weather)
+
+#joining the two datasets using inner join
+weather_flights_joined <- inner_join(weather,flights, by=c("origin","year","hour", "day","month","time_hour"))
+```
+
+
+3. From the joined data, keep only the following columns as we build our first model: departure delay, origin, departure time, temperature, wind speed, precipitation, and visibility. Omit observations that do not have all of these variables present.
+
+```{r}
+
+#filtering the dataset as per the columns mentioned
+w_f_filtered <- na.omit(weather_flights_joined %>% dplyr::select(dep_delay,dep_time,origin,temp,wind_speed,precip,visib))
+
+```
+
+4. Split your data into a \emph{training} and \emph{test} set based on an 80-20 split. In other words, 80\% of the observations will be in the training set and 20\% will be in the test set. Remember to set the random seed.
+
+```{r}
+
+
+# 80% split
+sample_size <- floor(0.80 * nrow(w_f_filtered))
+
+## setting the seed 
+set.seed(123)
+train_ind <- sample(seq_len(nrow(w_f_filtered)), size = sample_size)
+
+#creating train and test datasets
+train <- w_f_filtered[train_ind, ]
+test <- w_f_filtered[-train_ind, ]
+
+```
+
+5. Build a linear regression model to predict departure delay using the subset of variables indicated in (3.). What is the RMSE on the training set? What is the RMSE on the test set? Which is higher and is this expected?
+
+We make our linear regression model using the training dataset. In the below observation, rmse for my training dataset came out to be 38.38471 and for my test data set 42.07847. I believe that the value is lower for the training dataset as we have built our model using training dataset and so the error values tend to be less when we do prediction on training dataset whereas they are more in case of test dataset.
+
+```{r}
+
+#creating the linear regression model on the train dataset
+fit_all <- lm(dep_delay ~ ., train)
+summary(fit_all) 
+
+tdd <-as.vector(train$dep_delay)
+
+#creat
+predictions_train <- predict(fit_all, train)
+
+#rmse for train
+rmse(tdd, predictions_train)
+
+#rmse for test
+rmse(test$dep_delay, predictions_train)
+
+```
+
+6. Now, improve upon these prediction results by including additional variables in your model. Make sure you keep at least 95% of original data (i.e. about 320K observations across both the training and test datasets). Do not include the arrival time, scheduled arrival time, or the arrival delay in your model. Use the same observations as above for the training and test sets (i.e. keep the same rows but add different variables/columns at your discretion). Can you improve upon the training RMSE? Once you have a model that you feel adequately improves the training RMSE, does your model improve the test RMSE? Which variables did you include in your model?
+
+
+Answer : On careful observation and after trying a few combinations I have included the variables such as origin, departure delay, precipitatioon, visibility, air time, destination, carrier, humidity, temperature and wind speed in the model. These variable have helped me in decreasing the RMSE value and hence helped in improving the model. The newer RMSE values for train and test dataset are 37.79809 & 37.54321.
+```{r}
+
+
+dataset_improved<- na.omit(subset(weather_flights_joined, select = c("origin",
+"dep_delay", "dep_time", "precip", "visib","flight","distance", "air_time","dest", "carrier", "humid", "temp", "wind_speed")))
+
+
+set.seed(110)
+sample_size = floor(0.80*nrow(dataset_improved))
+train_dataset_new<- sample(seq_len(nrow(dataset_improved)),size = sample_size)
+train_improved<- dataset_improved[train_dataset_new,]
+test_improved <- dataset_improved[-train_dataset_new,]
+                           
+fit_linear_new <- lm(dep_delay ~ ., dataset_improved)
+
+predictions_train<- predict(fit_linear_new, train_improved)
+rmse(train_improved$dep_delay, predictions_train)
+
+predictions_test<- predict(fit_linear_new, test_improved)
+rmse(test_improved$dep_delay, predictions_test)
+```
+
+#### Predictions with a categorical output (classification)
+
+7.  Load in the titanic data. Split your data into a \emph{training} and \emph{test} set based on an 80-20 split. In other words, 80\% of the observations will be in the training set and 20\% will be in the test set. Remember to set the random seed.
+
+```{r}
+
+titanic <- read.csv("titanic.csv")
+
+# 80% split
+sample_size <- floor(0.80 * nrow(titanic))
+
+## setting the seed 
+set.seed(123)
+train_ind <- sample(seq_len(nrow(titanic)), size = sample_size)
+
+train_titanic <- titanic[train_ind, ]
+test_titanic <- titanic[-train_ind, ]
+
+
+```
+
+In this problem set our goal is to predict the survival of passengers. First, let's train a logistic regression model for survival that controls for the socioeconomic status of the passenger. 
+
+8. Fit the model described above (i.e. one that only takes into account socioeconomic status) using the \texttt{glm} function in R. 
+
+```{r}
+#here we have taken plcass which is passenger class in the titanic and which relates to socio economic status
+logit_train_socioeconomic<- glm(survived ~ pclass , data = train_titanic , family ='binomial')
+summary(logit_train_socioeconomic)
+```
+
+
+9. What might you conclude based on this model about the probability of survival for lower class passengers?
+
+Answer : As we can see that the probability of survival is increasing with the class the passenger has boarded. For the first class passengers, the probability is around 60%. For second class passengers it is around 43 percent and for the third class passengers it is significantly lower and close to 25%.  
+
+``` {r}
+logit2probfun <- function(logit){
+odds <- exp(logit)
+probability <- odds / (1 + odds)
+return(probability)
+}
+
+Intercept <- coef(logit_train_socioeconomic)[1]
+Beta_survival <- coef(logit_train_socioeconomic)[2]
+logitssurvival1 <- Intercept + 1*Beta_survival
+probalility_of_survival_1<-logit2probfun(logitssurvival1)
+
+Intercept <- coef(logit_train_socioeconomic)[1]
+Beta_survival <- coef(logit_train_socioeconomic)[2]
+logitssurvival2 <- Intercept + 2*Beta_survival
+probalility_of_survival_2<-logit2probfun(logitssurvival2)
+
+Intercept <- coef(logit_train_socioeconomic)[1]
+Beta_survival <- coef(logit_train_socioeconomic)[2]
+logitssurvival3 <- Intercept + 3*Beta_survival
+probalility_of_survival_3<-logit2probfun(logitssurvival3)
+
+
+probalility_of_survival_1
+probalility_of_survival_2
+probalility_of_survival_3
+
+
+```
+Next, let's consider the performance of this model. 
+
+10. Predict the survival of passengers for each observation in your test set using the model fit in Problem 2. Save these predictions as \texttt{yhat}.
+
+
+```{r}
+
+yhat<- predict(logit_train_socioeconomic, type = "response")
+summary(yhat)
+
+```
+
+11. Use a threshold of 0.5 to classify predictions. What is the number of false positives on the test data? Interpret this in your own words.
+
+Answer: We have calculated the false positives to be 56. In any model, we woud want to minimize the false positives as it affects the precision of our model.
+
+```{r}
+
+logit_test<- glm(survived ~ pclass , data = test_titanic , family ='binomial')
+
+#prediction on our test dataset's fit  
+yhat_t_predict <- predict(logit_test, type = "response")
+
+
+hatR_t <- ifelse(yhat_t_predict > 0.5, 1, 0)
+
+hatR_t <- as.factor(hatR_t)
+
+test_titanic$survived <- as.factor(test_titanic$survived)
+
+#creating confusion matrix
+confusionMatrix(hatR_t,(test_titanic$survived))
+
+```
+
+
+12. Using the \texttt{roc} function, plot the ROC curve for this model. Discuss what you find.
+
+Answer:  We want the AUC value of the curve to be closer to 1. In this case the value of AUC is 0.6326. We can try to improve this value further to make our model than the current state.
+
+```{r}
+roc <- roc(survived ~ pclass, data = test_titanic, family='binomial')
+roc_plot<-plot(roc, legacy.axes = TRUE, print.thres = "best")
+roc_plot
+```
+
+13. Suppose we use the data to construct a new predictor variable based on a passenger's listed title (i.e. Mr., Mrs., Miss., Master). Why might this be an interesting variable to help predict passenger survival?
+
+Use the following custom function to add this predictor to your dataset.
+
+Answer: From our observations, we can say that title can be a good predictor of determining the kind of people survived. We can determine whether those who survived were male, female, married, unmarried or children.
+
+
+```{r}
+#including titles
+getTitles <- function(name) {
+  for (title in c("Master", "Miss", "Mrs.", "Mr.")) {
+    if (grepl(title, name)) {
+      return(title)
+    }
+  }
+  return("Nothing")
+}
+
+titanic$Title <- map_chr(titanic$name, getTitles)
+titanic$Title <- as.factor(titanic$Title)
+titanic$Title <- as.numeric(titanic$Title)
+```
+
+14 Fit a second logistic regression model including this new feature. Use the \texttt{summary} function to look at the model. Did this new feature improve the model? 
+
+Answer:
+Previous AIC value: 1292.8
+
+New AIC value:0.6326
+
+Previous AUC value: 1281.5
+
+New AUC value:  0.6974
+
+As we can see from the above values that the AIC values have dercreased a bit and the AUC values have increased a bit, that means that out model has improved a bit.
+
+```{r}
+set.seed(123)
+smp_siz = floor(0.80*nrow(titanic))
+train_size_new <- sample(seq_len(nrow(titanic)),size = smp_siz)
+train_titanic_new <- titanic[train_size_new,]
+test_titanic_new <- titanic[-train_size_new,]
+
+logit_second <- glm(survived ~ pclass + Title , data = train_titanic_new , family = "binomial")
+summary(logit_second)
+
+```
+
+```{r}
+#plotting and calculating area under the curve
+yhat2 <- predict.glm(logit_second, newdata = train_titanic_new, type = "response")
+roc2 <- roc(train_titanic_new$survived, yhat2)
+plot_2 <- plot(roc2, print.thres="best", print.thres.best.method="closest.topleft")
+roc2
+plot_2
+```
+
+
+
+15. Comment on the overall fit of this model. For example, you might consider exploring when misclassification occurs.
+
+Answer : We can conclude that as the AIC value has decreased, overall fit has been improved. The ROC value which gives us the operating characteristics, here tells us that the sensivity is higher than the specificity for the curve and hence the model gets improved on adding the title variable.
+
+16.  Predict the survival of passengers for each observation in your test data using the new model. Save these predictions as \texttt{yhat2}.
+
+``` {r}
+
+yhat2 <- predict.glm(logit_second, newdata = train_titanic_new, type = "response")
+g_new <- roc(train_titanic_new$survived, yhat2)
+
+plot(g_new, print.thres="best", print.thres.best.method="closest.topleft")
+
+```
+
+#### Random forests
+
+Another very popular classifier used in data science is called a \emph{random  forest}\footnote{\url{https://www.stat.berkeley.edu/\~breiman/RandomForests/cc_home.htm}}.
+
+17. Use the \texttt{randomForest} function to fit a random forest model with passenger class and title as predictors. Make predictions for the test set using the random forest model. Save these predictions as \texttt{yhat3}.
+
+
+
+```{r}
+
+# 80% split
+sample_size <- floor(0.80 * nrow(titanic))
+
+## settingthe seed 
+set.seed(123)
+train_ind_forest <- na.omit(sample(seq_len(nrow(titanic)), size = sample_size))
+
+train_titanic_rf <- titanic[train_ind_forest, ]
+test_titanic_rf <- titanic[-train_ind_forest, ]
+model_fit <- randomForest(survived ~ pclass + Title, data = train_titanic_rf, importance = TRUE)
+
+yhat3 <- predict(model_fit, test_titanic_rf, type = 'response')
+
+titanic_random_forest <- data.frame(test_titanic_rf$pclass, test_titanic_rf$Title, test_titanic_rf$survived, yhat3)
+
+titanic_random_forest$classification <- ifelse(titanic_random_forest$yhat3 > 0.5,1,0)
+
+confusionMatrix(factor(titanic_random_forest$classification),factor(titanic_random_forest$test_titanic_rf.survived))
+
+
+
+roc_random_forest <- roc(test_titanic_rf$survived, yhat3)
+
+plot(roc_random_forest, print.thres="best", print.thres.best.method="closest.topleft")
+```
+
+18.  Develop your own random forest model (i.e. add/remove variables at your discretion), attempting to improve the model performance.  Make predictions for the test set using your new random forest model. Save these predictions as \texttt{yhat4}.
+
+
+```{r}
+?randomForest
+
+rfit_rf_improved <- randomForest(survived ~ pclass + age + sex + Title, data = test_titanic_rf, importance = TRUE, na.action = na.roughfix)
+yhat4 <- predict(rfit_rf_improved, test_titanic_rf, type = 'response')
+
+titanic_random_forest_improved <- data.frame(test_titanic_rf$pclass , test_titanic_rf$Title, test_titanic_rf$survived, test_titanic_rf$sex, yhat4)
+titanic_random_forest_improved$classification <- ifelse(titanic_random_forest_improved$yhat4 > 0.5,1,0)
+confusionMatrix(factor(titanic_random_forest_improved$classification),factor(titanic_random_forest_improved$test_titanic_rf.survived))
+
+
+roc_model_rf_improved <- roc((test_titanic_rf$survived), (yhat4))
+
+plot(roc_model_rf_improved, print.thres="best", print.thres.best.method="closest.topleft")
+
+```
+
+
+19. Compare the accuracy of each of the classification models from this problem set using ROC curves. Comment on which statistical learning method works best for predicting survival of the Titanic passengers. 
+
+Answer: As we can from the four plots below that from first to fourth, the area under the curve is increasing.
+
+For the socioeconomic status, AUC is : 0.696
+
+After including other variables, AUC is : 0.838
+
+After applying random forest function, AUC is : 0.815 
+
+After improving random forest method , AUC is : 0.915
+
+From above we can conclude that the AUC for the improved random forest  plot is more and hence it is the our best model and the random forest in our case works best.
+```{r}
+#1 socio economic
+plot(roc, legacy.axes = TRUE, print.thres = "best")
+
+#2 Title
+plot(g_new, print.thres="best", print.thres.best.method="closest.topleft")
+ 
+#3 Random forest
+plot(roc_random_forest, print.thres="best", print.thres.best.method="closest.topleft")
+
+#4 Trying to improve random forest
+plot(roc_model_rf_improved, print.thres="best", print.thres.best.method="closest.topleft")
+```
+
+
